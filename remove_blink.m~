@@ -1,0 +1,257 @@
+function remove_blink
+
+% Filter data: cut saccades and blinks from the gaze data and then
+% concatenate and interpolate the eye position
+% Save data to disk
+
+
+% == Explanation of the 17 columns ===
+% 1. time in sec (only sec part)
+% 2. time in msec (only miclosec part)
+% 3. x gaze coordinate of the left eye
+% 4. y gaze coordinate of the left eye
+% 5. x gaze coordinate of the right eye
+% 6. y gaze coordinate of the right eye
+% 7. left eye position - x coordinate
+% 8. left eye position - y coordinate
+% 9. right eye position - x coordinate
+% 10. right camera eye position - y coordinate
+% 11. left eye validity
+% 12. right eye validity
+% 13. diameter of pupil of the left eye
+% 14. diameter of pupil of the right eye
+% 15. distance of the camera from the left eye
+% 16. distance of the camera from the right eye
+% 17. time in sec(including msec part)
+
+dbstop if error
+
+DIR.dataRaw = '../../dataRaw/';
+
+% files = {'s01_bbo' 's01_mrl' 's01_mrr'};
+% files = {'s01_mrl' 's02_mrl' 's03_mrl'};
+files = { 's01_bco' 's02_bci_1' 's03_bco'};
+
+% files = {'s01_mrr' 's02_mrr' 's03_mrr'};
+
+% files = { 's03_mrr'};
+time2cut = 20;
+
+
+for ifiles = 1 : length(files)
+    
+    % Load each subject once at a time,if you don't specify any return
+    % variable to 'load' you'll just get 'Exp' on the workspace
+    load ( [DIR.dataRaw   files{ifiles} '_eyeBeh.mat' ]);
+    
+    % Eliminate saccades & Eliminate Blinks
+    
+    for irun = 1 : length(Run)
+        
+        for iblk = 1 : length(Run(irun).block)
+            
+            gazeData = Run(irun).block(iblk).gazeData;
+            blinks   = Run(irun).block(iblk).blinks;
+            saccades = Run(irun).block(iblk).saccades;
+            rawGazeData = gazeData;
+
+            %% replace missing points to nan
+            for iblink = 1 : size(blinks,1)
+                gazeData( gazeData(:, 17) >= blinks(iblink,1) & gazeData(:, 17) <= blinks(iblink,2), 3:10 ) = nan;
+            end
+            
+            for isacc = 1 : size(saccades,1)
+                gazeData( gazeData(:, 17) >= saccades(isacc,1) & gazeData(:, 17) <= saccades(isacc,2), 3:10 ) = nan;
+            end
+           
+            idx_missp_blk = find(isnan(gazeData(:,3)));
+            repGazeData   = gazeData; 
+            %- missing points have been replaced by nan.
+            
+
+            %% interpolate linearly (replace nan)
+            for icolumn = 3:10 %- eye gaze data
+                x(:,icolumn) = gazeData(:,icolumn);
+                t = linspace( 0, 2, numel(x(:,icolumn)) );
+                nans = isnan(x(:,icolumn));
+                x(nans,icolumn) = interp1( t(~nans), x(~nans,icolumn), t(nans) );
+            end
+            
+            gazeData(:,3:10) = x(:,3:10); 
+
+            %- missing points replaced by nan have been inrerpolated
+            %linearly.
+            
+            
+            %% put the data into structure
+            for itri = 1 : Run(irun).block(iblk).nTrials
+                
+                % Filter the blinks and saccades from the data in each trial
+                tr_times = Run(irun).block(iblk).trial_evTimes(itri, :);
+                intpGazeData_tri = gazeData(gazeData(:,17) >= tr_times(1) & gazeData(:,17) <= tr_times(2), : );
+                rawGazeData_tri  = rawGazeData(rawGazeData(:,17) >= tr_times(1) & rawGazeData(:,17) <= tr_times(2), : );
+                
+                
+                % size of gazeData might be bigger or smaller than expected size.
+                % So, check the size and adjust into the same size in each
+                % trial.
+                nSamps = Run(irun).block(iblk).stimFrames * 5;
+                if size(intpGazeData_tri,1) > nSamps
+                    intpGazeData_tri = intpGazeData_tri(1: nSamps, :);
+                    rawGazeData_tri  = rawGazeData_tri(1: nSamps, :);
+                    
+                    idx_missp_tri = find ( isnan ( repGazeData ...
+                        ( repGazeData(:,17) >= tr_times(1) & repGazeData(:,17) <= tr_times(2), 3 ) ) );
+                    
+                elseif  size(intpGazeData_tri,1) < nSamps
+                    nS = size(intpGazeData_tri, 1);
+                    idx_missp_tri = find ( isnan ( repGazeData ...
+                        ( repGazeData(1:nS,17) >= tr_times(1) & repGazeData(1:nS,17) <= tr_times(2), 3 ) ) );
+                    
+                    intpGazeData_tri(nS + 1 : nSamps, :) = nan;
+                    rawGazeData_tri(nS + 1 : nSamps, :) = nan;
+                    
+                end
+  
+                %% Resample the response vector to match the eye data
+                response_300hz       = my_interp(Run(irun).block(iblk).response(itri, :), 5);
+                response_filt_300hz  = my_interp(Run(irun).block(iblk).response(itri, :), 5);
+                response_times_300hz = (1: size(response_filt_300hz, 1) ) ./ 300 * 1000;
+                
+                response_filt_300hz(idx_missp_tri,:) = 2; 
+                %- as nan in response means "no bottun press", replace
+                %response with "2" for gaze missing points. (nan: no bottun
+                %press, 0: right, 1: left, 2: missing point )
+                
+                tr_blink_time = blinks( blinks(:,1) >= tr_times(1) & blinks(:,2) <= tr_times(2), :  ) ;
+                
+%                 tr_blink_time(:,1) = tr_blink_time(:,1) - time2cut;
+%                 tr_blink_time(:,2) = tr_blink_time(:,2) + time2cut;
+                
+                tr_sacc_time = saccades( saccades(:,1) >= tr_times(1) & saccades(:,2) <= tr_times(2), 1:2 );
+%                 tr_sacc_time(:,1) = tr_sacc_time(:,1) - time2cut;
+%                 tr_sacc_time(:,2) = tr_sacc_time(:,2) + time2cut;
+                
+%                 evs2filt = cat(1, tr_blink_time, tr_sacc_time );
+%                 evs2filt = sortrows(evs2filt, 1);
+%                 allIdxs = [];
+%                 
+%                 for iev = 1 : size(evs2filt, 1)
+%                     
+%                     % I need the idxs to match with the response vector
+%                     idxs  = find( filtGazeData_tri(:,17) >= evs2filt(iev, 1) & filtGazeData_tri(:,17) <= evs2filt(iev, 2));
+% %                     keep_idx = intersect(idxs, idxs3);
+%                     allIdxs = cat(1, allIdxs, idxs);
+%                     
+%                     % Select data, find final point of the event and
+%                     % take the remaining of the signal to that baseline
+%                     idxs1 = find( filtGazeData_tri(:,17) >= evs2filt(iev, 1), 1, 'first');
+%                     idxs2 = find( filtGazeData_tri(:,17) >= evs2filt(iev, 2), 1, 'first');
+%                     
+%                     % Move all remaining signal to the right
+%                     difference = -(filtGazeData_tri(idxs2, 5) - filtGazeData_tri(idxs1, 5));
+%                     filtGazeData_tri(idxs2:end, 5) = filtGazeData_tri(idxs2:end, 5) + difference;
+%                     % Eliminate the chunk of event
+%                     filtGazeData_tri = cat(1, filtGazeData_tri(1:idxs1, :), filtGazeData_tri(idxs2:end, :));
+%                     response_filt_300hz = cat(1, response_filt_300hz(1:idxs1, :), response_filt_300hz(idxs2:end, :));                   
+%                     
+%                 end
+
+                % Save data into Run
+                Run(irun).block(iblk).gazeData_trial{itri}       = rawGazeData_tri;%#ok
+                Run(irun).block(iblk).filtGazeData{itri}         = intpGazeData_tri; %#ok
+                Run(irun).block(iblk).response_300hz{itri}       = response_300hz; %#ok
+                Run(irun).block(iblk).response_filt_300hz{itri}  = response_filt_300hz;%#ok
+                Run(irun).block(iblk).response_times_300hz{itri} = response_times_300hz';%#ok
+
+            end
+            
+            clear gazeData x
+        end
+    end
+    
+    save ( [DIR.dataRaw   files{ifiles} '_eyeBeh_filt.mat' ], 'Exp', 'Run');
+    msg = sprintf('Done with file: %s', files{ifiles}); disp(msg);
+    clear Run Exp
+end
+
+function y = my_interp(vector, factor)
+
+y = [];
+for m = 1 : length(vector)
+    
+    x = vector (m);
+    y = cat(2, y, repmat(x, 1, factor));
+    
+end
+
+y = y';
+
+
+%% old stuff
+
+%
+%     %% put gaze data into structure
+%     if samp_n0 == 1 && samp_n1 == 0
+%         %- case: the time gets into outTrial from inTrial
+%
+%         Run(rn_idx).block(bk_idx).trial(tr_idx).gazeData = data;
+%
+%         if ~isempty(Run(rn_idx).block(bk_idx).blinks)
+%             [tr_blinks tmp] = find(Run(rn_idx).block(bk_idx).blinks(:,1)==tr_idx);
+%             Run(rn_idx).block(bk_idx).trial(tr_idx).blinks   =  Run(rn_idx).block(bk_idx).blinks(tr_blinks, 1:5);
+%             clear tr_blinks tmp
+%         end
+%
+%         data = [];
+%         tr_samp_idx = 0;
+%         tr_idx = tr_idx + 1;
+%
+%         if tr_idx == size(Run(rn_idx).block(bk_idx).trial_evTimes,1) + 1;
+%             % - if the index completed to the end of trial
+%             tr_idx = 1;
+%             bk_idx = bk_idx + 1;
+%             bl_idx = 0; %- reset blink index
+%
+%             if bk_idx == size(Run(rn_idx).block,2) + 1;
+%                 % - if the index completed to the end of block
+%                 bk_idx = 1; % - reset block index
+%                 rn_idx = rn_idx + 1; %- go to the next run
+%
+%                 if rn_idx == size(Run,2) + 1
+%                     % - if the index completed to the end of run
+%                     break
+%                 end
+%             end
+%         end
+%
+%     end
+%
+%
+%     %% let's go to the next line
+%     samp_n0 = samp_n1;
+%     bl_n0   = bl_n1;
+%
+%     else
+%         break
+% end
+% end
+
+% figure
+% plot(Run(1).block(1).trial(1).gazeData(:,2),Run(1).block(1).trial(1).gazeData(:,3))
+% hold on
+% plot(Run(1).block(1).trial(2).gazeData(:,2),Run(1).block(1).trial(2).gazeData(:,3),'r')
+% plot(Run(1).block(1).trial(3).gazeData(:,2),Run(1).block(1).trial(3).gazeData(:,3),'g')
+%
+% figure
+% plot(Run(1).block(1).trial(1).gazeData(:,1)-Run(1).block(1).trial(1).gazeData(1,1),Run(1).block(1).trial(1).gazeData(:,3))
+% hold on
+% plot(Run(1).block(1).trial(2).gazeData(:,1)-Run(1).block(1).trial(2).gazeData(1,1),Run(1).block(1).trial(2).gazeData(:,3),'r')
+% plot(Run(1).block(1).trial(3).gazeData(:,1)-Run(1).block(1).trial(3).gazeData(1,1),Run(1).block(1).trial(3).gazeData(:,3),'g')
+%
+% figure
+% plot(Run(1).block(1).trial(1).gazeData(:,1)-Run(1).block(1).trial(1).gazeData(1,1),Run(1).block(1).trial(1).gazeData(:,2))
+% hold on
+% plot(Run(1).block(1).trial(2).gazeData(:,1)-Run(1).block(1).trial(2).gazeData(1,1),Run(1).block(1).trial(2).gazeData(:,2),'r')
+% plot(Run(1).block(1).trial(3).gazeData(:,1)-Run(1).block(1).trial(3).gazeData(1,1),Run(1).block(1).trial(3).gazeData(:,2),'g')
+

@@ -1,0 +1,130 @@
+function class_behTri
+% Classify each trials by behavioural response so that we can analyse data
+% depends on the behaviour.
+% response is either R, L or N (no press or another key press).
+% For now, we are going to see just 2-1 (short) condition to make it
+% simple.
+
+% Written by M Fujiwara, Dec 1, 2014
+
+dbstop if error
+addpath('./aux_files/')
+DIR.dataRaw = '../../dataRaw/';
+DIR.figures = '../../figures/';
+
+% Here we define all files that we are going to analyse
+subjects     = [1 2 3];
+% cond.rivalry = ['m' 'b'];% - monoculor/binoculor
+% cond.color   = ['g' 'r' 'b' 'c'];
+% cond.ang     = ['r' 'l' 'i' 'o'];
+
+gratDir  = 'br'; %'RIGHT'
+whichEye = {'right' 'left'};
+whichOKN = 'hirizontal';
+cond     = '2-1'; %'60-1'
+firstPeriod   = [0 1]; %- in sec [from, till]
+firstLimRate  = 0.6; %- how much rate of the period is required to be named
+secondPeriod  = [0.6 2]; %- in sec [from, till]
+secondLimRate = 0.6;
+
+switch gratDir
+    case 'left'
+        files = {'s01_mrl' 's02_mrl' 's03_mrl'};
+    case 'right'
+        files = {'s01_mrr' 's02_mrr' 's03_mrr'};
+    case 'br'
+        files = {'s01_bco' 's02_bci_1' 's03_bco'};
+end
+
+for ifiles = 1: length(files)
+    load([DIR.dataRaw  files{ifiles}  '_eyeBeh_filt.mat'])
+    
+    switch cond
+        case '2-1'
+            nTrialsPerBlk = 20;
+            
+        case '60-1'
+            nTrialsPerBlk = 1;
+    end
+    
+    for irun = 1:length(Run)
+        for iblk = 1:length(Run(irun).block)
+            
+            if ~strcmp(Run(irun).block(iblk).id,cond)
+                continue                 
+            end
+            
+            for itri = 1:Run(irun).block(iblk).nTrials
+                tmp = Run(irun).block(iblk).response(itri,:);
+                
+                %%% first response %%%
+                firstPeriodFrame = firstPeriod * Exp.Cfg.FrameRate;
+                
+                if firstPeriodFrame(1) == 0
+                    firstPeriodFrame(1) = 1;
+                    %- made time to index
+                end
+
+                numFrameFirst = diff(firstPeriodFrame) + 1;
+                
+                rateL1 = nansum(tmp(firstPeriodFrame(1):firstPeriodFrame(2)))...
+                    /numFrameFirst;
+                rateN1 = sum(isnan(tmp(firstPeriodFrame(1):firstPeriodFrame(2))))...
+                    /numFrameFirst;
+                rateR1 = 1 - (rateL1 + rateN1);
+                
+                rate1 = [rateL1, rateR1, rateN1];
+                firstRespRate = max(rate1);
+               
+                if firstRespRate >= firstLimRate
+                    firstResp = find(rate1(:) == firstRespRate);
+                else
+                    firstResp = nan;
+                end
+                
+                
+                %%%% second response %%%
+                secondPeriodFrame = secondPeriod * Exp.Cfg.FrameRate;
+                
+                if secondPeriodFrame(1) == 0
+                    secondPeriodFrame(1) = 1;
+                    %- made time to index
+                end
+                
+                numFrameSecond = diff(secondPeriodFrame) + 1;
+
+                rateL2 = nansum(tmp(secondPeriodFrame(1):secondPeriodFrame(2)))...
+                    /numFrameSecond;
+                rateN2 = sum(isnan( tmp( secondPeriodFrame(1):secondPeriodFrame(2) ) ) )...
+                    /numFrameSecond;
+                rateR2 = 1 - (rateL2 + rateN2);
+                
+                rate2 = [rateL2, rateR2, rateN2];
+                secondRespRate = max(rate2);
+                
+                if secondRespRate >= secondLimRate
+                    secondResp = find(rate2(:) == secondRespRate);
+                else
+                    secondResp = nan;
+                end
+                
+                
+                %%% put the data in the structure
+                Run(irun).block(iblk).trial_beh(itri,1:2)   = firstPeriod;
+                Run(irun).block(iblk).trial_beh(itri,3:4)   = secondPeriod;
+                Run(irun).block(iblk).trial_beh(itri,5)     = firstLimRate;
+                Run(irun).block(iblk).trial_beh(itri,6)     = secondLimRate;
+                Run(irun).block(iblk).trial_beh(itri,7:9)   = rate1;
+                Run(irun).block(iblk).trial_beh(itri,10)    = firstResp; %- 1:Left, 2:Right, 3: Nan
+                Run(irun).block(iblk).trial_beh(itri,11)    = firstRespRate;
+                Run(irun).block(iblk).trial_beh(itri,12:14) = rate2;
+                Run(irun).block(iblk).trial_beh(itri,15)    = secondResp; %- 1:Left, 2:Right, 3: Nan
+                Run(irun).block(iblk).trial_beh(itri,16)    = secondRespRate;
+                
+            end 
+        end
+    end
+  
+    save([DIR.dataRaw  files{ifiles}  '_eyeBeh_filt_.mat'])
+    
+end
