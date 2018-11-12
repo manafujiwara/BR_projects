@@ -5,7 +5,7 @@ predict perception during binocular rivalry in Parkinson's disease patients.
 
 ## Discription
 - The codes suppose to analyse data collected in an experiment using codes in
- https://github.com/manafujiwara/BR_projects/experiments
+ https://github.com/manafujiwara/BR_projects/experiment
 
 - Put all the analysis codes into a folder (leave nested codes, for example,
 aux_files, as they are) that is going to be the home directory. For all
